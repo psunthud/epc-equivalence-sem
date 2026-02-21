@@ -1,0 +1,277 @@
+---
+title: "Online Appendix C"
+author: "Sunthud Pornprasertmanit, Suppanut Sriutaisuk, Moritz Heene, Wei Wu"
+date: "`r format(Sys.time(), '%d/%m/%Y')`"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{css style settings, echo = FALSE}
+blockquote {
+    padding: 10px 20px;
+    margin: 0 0 20px;
+    font-size: 14px;
+    border-left: 5px solid #eee;
+    font-family: "Courier New";
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r xx, include=FALSE}
+```
+
+Online appendix for Pornprasertmanit, Sriutaisuk, Heene, and Wu (in preparation). "Equivalence testing of expected parameter changes: A new way to assess model fit in structural equation modeling". 
+
+## Overview
+
+This online appendix provides a step-by-step illustration of equivalence testing based on expected parameter changes (EPCs) in a confirmatory factor analysis (CFA) model. We demonstrate how EPC-based equivalence testing can be implemented in practice, how to interpret both global and local decisions, and how model evaluation depends jointly on the current model specification and the prespecified smallest effect size of interest (SESOI).
+
+In addition, we illustrate the use of the diagnostic function `epcEquivCheck()`, which evaluates whether EPC-based equivalence testing may yield large EPCs even when the underlying misspecifications are relatively small—a phenomenon referred to as the **compensatory effect**. When the compensatory effect is pronounced, large EPCs may reflect parameter compensation rather than genuine substantive misspecification. In such cases, model adjustments must be interpreted with particular caution.
+
+All models are fit to the same correlation matrix using a fixed sample size of $N=4,000$. EPC equivalence testing is conducted using `epcEquivFit()`, and compensatory effects are assessed using `epcEquivCheck()`. Both functions are available in the **semTools** package (version 0.5-8 or later), with model estimation carried out in **lavaan**.
+
+```{r packageload, message=FALSE, warning=FALSE}
+library(lavaan)
+library(semTools)
+```
+
+## Population Correlation Matrix
+
+Christopher et al. (2012) examined relations among reading and comprehension abilities in children. The population correlation matrix for the age 8–10 group was extracted from Table 2 of the original article and is reproduced here for illustration purposes.
+
+```{r cormat}
+cor_mat <- matrix(
+  c(
+    1.00, 0.44, 0.54, 0.58, 0.44, 0.48, 0.49, 0.42, 0.36, 0.42,
+    0.44, 1.00, 0.44, 0.47, 0.60, 0.40, 0.40, 0.32, 0.27, 0.33,
+    0.54, 0.44, 1.00, 0.45, 0.48, 0.45, 0.39, 0.27, 0.17, 0.25,
+    0.58, 0.47, 0.45, 1.00, 0.52, 0.47, 0.66, 0.68, 0.61, 0.72,
+    0.44, 0.60, 0.48, 0.52, 1.00, 0.34, 0.51, 0.42, 0.36, 0.40,
+    0.48, 0.40, 0.45, 0.47, 0.34, 1.00, 0.42, 0.34, 0.33, 0.33,
+    0.49, 0.40, 0.39, 0.66, 0.51, 0.42, 1.00, 0.74, 0.66, 0.69,
+    0.42, 0.32, 0.27, 0.68, 0.42, 0.34, 0.74, 1.00, 0.75, 0.85,
+    0.36, 0.27, 0.17, 0.61, 0.36, 0.33, 0.66, 0.75, 1.00, 0.73,
+    0.42, 0.33, 0.25, 0.72, 0.40, 0.33, 0.69, 0.85, 0.73, 1.00
+  ),
+  nrow = 10,
+  byrow = TRUE,
+  dimnames = list(
+    c("WJORAL","QRLL","Barnes","WJPC","QRIR","GORT",
+      "PIATC","PIATR","PIATS","WordR"),
+    c("WJORAL","QRLL","Barnes","WJPC","QRIR","GORT",
+      "PIATC","PIATR","PIATS","WordR")
+  )
+)
+```
+
+Variable abbreviations are as follows:
+
+- WJORAL = Woodcock–Johnson Oral Comprehension
+- QRLL = Qualitative Reading Inventory–Mean Listening Question Score
+- Barnes = Barnes KNOW-IT composite (coherence inference, elaborative inference, literal proportions)
+- WJPC = Woodcock–Johnson Passage Comprehension
+- QRIR = Qualitative Reading Inventory–Mean Reading Question Score
+- GORT = Gray Oral Reading Test–3
+- PIATC = PIAT Comprehension
+- PIATR = PIAT Reading Recognition
+- PIATS = PIAT Spelling
+- WordR = Time-limited oral reading of single words
+
+Because EPC-based equivalence testing relies on sufficiently narrow confidence intervals (CIs) for EPCs, the sample size is fixed at $N=4,000$ to ensure adequate precision. This choice is made solely for illustrative purposes and should not be interpreted as a recommendation for applied research.
+
+```{r samplesize}
+N <- 4000
+```
+
+## Baseline Model
+
+The baseline model corresponds to Figure 2 in the original article (see also Figure X2 in the present manuscript). The model specifies two correlated latent factors, *comprehension* and *word reading*, with a single residual covariance between `QRLL` and `QRIR`. Two indicators (`WJPC` and `PIATC`) load on both factors.
+
+```{r baselinemodel}
+model_base <- '
+  comp =~ WJORAL + QRLL + Barnes + GORT + QRIR + WJPC + PIATC
+  wordreading =~ WJPC + PIATC + PIATR + PIATS + WordR
+  QRLL ~~ QRIR
+'
+```
+
+Fit the model to the sample correlation defined above.
+
+```{r baselinemodelsummary}
+fit_base <- cfa(model_base, sample.cov = cor_mat, sample.nobs = N)
+summary(fit_base, std = TRUE, fit = TRUE)
+```
+
+Model fit is mixed relative to commonly used cutoff criteria (Hu & Bentler, 1999). Although incremental fit indices (CFI and TLI) are acceptable, RMSEA exceeds conventional thresholds. All standardized factor loadings are substantial except the loading of the comprehension factor on `PIATC` (.299), which falls slightly below commonly cited guidelines (.30–.40).
+
+We next apply EPC-based equivalence testing using `epcEquivFit()`. The SESOI is set to .40 for standardized factor loadings and .10 for residual correlations.
+
+```{r baselinemodelepc}
+epc_base <- epcEquivFit(fit_base, stdLoad = 0.4, cor = 0.1)
+summary(epc_base)
+```
+
+### Interpretation of EPC Equivalence Results
+
+The EPC evaluation indicates no underpowered fixed parameters. However, seven fixed parameters are classified as substantially misspecified, yielding a global decision of **substantial misspecification**. Ten fixed parameters are inconclusive, and the remaining 35 are classified as trivially misspecified.
+
+Inspection of the top substantially misspecified EPCs reveals that the largest misspecification corresponds to the residual covariance between `WJPC` and `WordR`. Several additional residual correlations also appear among the most substantially misspecified EPCs, suggesting that the baseline model omits substantively meaningful local dependencies.
+
+Overall, under the specified SESOI, the baseline model cannot be regarded as approximately correct.
+
+### EPC Equivalence Compensatory Effect Check
+
+The function `epcEquivCheck()` evaluates whether substantial misspecifications might be driven by inflated EPCs due to the compensatory effect. Each fixed parameter is perturbed by $\pm 75\%$ of the SESOI. If any resulting EPC exceeds the SESOI in magnitude, the compensatory effect is considered pronounced, and substantial misspecifications must be interpreted cautiously.
+
+```{r baselinemodelcheck}
+epcEquivCheck(fit_base)
+```
+
+For the baseline model, the standardized solution defines a valid population model, allowing the compensatory-effect check to be conducted. The results indicate that some perturbed parameters produce EPCs exceeding the SESOI. Consequently, the compensatory effect is **pronounced** for this model under the current SESOI.
+
+Importantly, a “pronounced” result does **not** imply that EPC equivalence testing is invalid. Rather, it indicates that even *trivial* misspecifications—approximately 75% of the SESOI—can generate EPCs exceeding the SESOI. Under such conditions, achieving a global trivial-misspecification decision is unlikely unless the true misspecifications are considerably smaller than the SESOI. Substantial misspecifications remain detectable, but their magnitudes may be inflated.
+
+Thus, a pronounced result signals that trivial equivalence is difficult to attain under the current model specification and SESOI.
+
+## First Model Adjustment
+
+Suppose that the residual covariance between `WJPC` and `WordR` is theoretically defensible, reflecting shared method variance or overlapping item content. This parameter is therefore freed in the model.
+
+```{r step1epc}
+model_step1 <- '
+  comp =~ WJORAL + QRLL + Barnes + GORT + QRIR + WJPC + PIATC
+  wordreading =~ WJPC + PIATC + PIATR + PIATS + WordR
+  QRLL ~~ QRIR
+  WJPC ~~ WordR
+'
+
+fit_step1 <- cfa(model_step1, sample.cov = cor_mat, sample.nobs = N)
+epc_step1 <- epcEquivFit(fit_step1, stdLoad = 0.4, cor = 0.1)
+summary(epc_step1)
+```
+
+After freeing this dominant residual covariance, four substantially misspecified fixed parameters remain, and the global EPC equivalence decision is still **substantial misspecification**.
+
+```{r step1check}
+epcEquivCheck(fit_step1)
+```
+
+However, the compensatory-effect check now yields a **not pronounced** result. Perturbations up to 75% of the SESOI no longer generate EPCs exceeding the SESOI. This indicates that, under the revised model, a trivial-misspecification decision is feasible in principle.
+
+This contrast highlights an important point: a pronounced result does not imply that EPC equivalence testing is uninformative. Rather, it may indicate that a dominant misspecification is distorting the EPCs of other fixed parameters (and potentially inflating its own EPC as well). Once that dominant parameter is freed, compensatory distortions may be reduced, and classifications of substantial EPCs become more reliable indicators of genuine misspecification.
+
+## Second Model Adjustment
+
+Next, we free the residual covariance between `PIATR` and `WordR`, assuming theoretical justification. This adjustment reduces the number of substantially misspecified parameters from four to two, but the global decision remains **substantial misspecification**.
+
+```{r step2epc}
+model_step2 <- '
+  comp =~ WJORAL + QRLL + Barnes + GORT + QRIR + WJPC + PIATC
+  wordreading =~ WJPC + PIATC + PIATR + PIATS + WordR
+  QRLL ~~ QRIR
+  WJPC ~~ WordR
+  PIATR ~~ WordR
+'
+
+fit_step2 <- cfa(model_step2, sample.cov = cor_mat, sample.nobs = N)
+epc_step2 <- epcEquivFit(fit_step2, stdLoad = 0.4, cor = 0.1)
+summary(epc_step2)
+```
+
+```{r step2check}
+epcEquivCheck(fit_step2)
+```
+
+At this stage, `epcEquivCheck()` is not applicable because the standardized parameter estimates no longer define a valid population correlation matrix. This does not invalidate EPC equivalence testing itself; it merely means that the compensatory-effect diagnostic cannot be computed under these conditions.
+
+## Third to Fifth Model Adjustments
+
+In Steps 3–5, additional measurment error covariances are freed (`Barnes ~~ PIATS`, `GORT ~~ QRIR`, and `WJORAL ~~ QRIR`) to further illustrate EPC-based diagnostics. Each step reduces the number of substantially misspecified EPCs, eventually eliminating them entirely.
+
+```{r step3epc}
+model_step3 <- '
+comp =~ WJORAL + QRLL + Barnes + GORT + QRIR + WJPC + PIATC 
+wordreading =~ WJPC + PIATC + PIATR + PIATS + WordR
+QRLL ~~ QRIR
+WJPC ~~ WordR 
+PIATR ~~ WordR 
+Barnes ~~ PIATS 
+'
+fit_step3 <- cfa(model_step3, sample.cov=cor_mat, sample.nobs=N)
+epc_step3 <- epcEquivFit(fit_step3, stdLoad = 0.4, cor = 0.1)
+summary(epc_step3)
+```
+
+```{r step3check}
+epcEquivCheck(fit_step3)
+```
+
+```{r step4epc}
+model_step4 <- '
+comp =~ WJORAL + QRLL + Barnes + GORT + QRIR + WJPC + PIATC 
+wordreading =~ WJPC + PIATC + PIATR + PIATS + WordR
+QRLL ~~ QRIR
+WJPC ~~ WordR 
+PIATR ~~ WordR 
+Barnes ~~ PIATS 
+GORT ~~ QRIR 
+'
+fit_step4 <- cfa(model_step4, sample.cov=cor_mat, sample.nobs=N)
+epc_step4 <- epcEquivFit(fit_step4, stdLoad = 0.4, cor = 0.1)
+summary(epc_step4)
+```
+
+```{r step4check}
+epcEquivCheck(fit_step4)
+```
+
+```{r step5epc}
+model_step5 <- '
+comp =~ WJORAL + QRLL + Barnes + GORT + QRIR + WJPC + PIATC 
+wordreading =~ WJPC + PIATC + PIATR + PIATS + WordR
+QRLL ~~ QRIR
+WJPC ~~ WordR 
+PIATR ~~ WordR 
+Barnes ~~ PIATS 
+GORT ~~ QRIR 
+WJORAL ~~ QRIR 
+'
+fit_step5 <- cfa(model_step5, sample.cov=cor_mat, sample.nobs=N)
+epc_step5 <- epcEquivFit(fit_step5, stdLoad = 0.4, cor = 0.1)
+summary(epc_step5)
+```
+
+```{r step5check}
+epcEquivCheck(fit_step5)
+```
+
+After Step 5, no fixed parameters are classified as substantially misspecified. Eleven parameters remain inconclusive, and 36 are trivially misspecified, yielding a global decision of **inconclusive**.
+
+At this point, EPC equivalence testing suggests that the model is close to trivial misspecification but lacks sufficient precision to reach a definitive conclusion under the current SESOI.
+
+## Sensitivity to SESOI
+
+Given an inconclusive global decision, researchers have two primary options: (a) increase sample size to obtain narrower EPC confidence intervals, or (b) relax the SESOI to reflect a more tolerant definition of substantive equivalence.
+
+For illustration, we increase the SESOI for measurement error correlations to .19. Under this relaxed criterion, all fixed parameters are classified as trivially misspecified, yielding a global decision of **equivalent**.
+
+```{r sesoiadjust}
+epc_step5_newsesoi <- epcEquivFit(fit_step5, stdLoad = 0.4, cor = 0.19)
+summary(epc_step5_newsesoi)
+```
+
+Substantively, this result indicates that the model can be regarded as approximately correct if researchers are willing to tolerate residual correlations of this magnitude. Otherwise, additional data would be required to reach a definitive conclusion under the original SESOI.
+
+## Summary
+
+This appendix demonstrates how `epcEquivFit()` can be used to implement EPC-based equivalence testing for both global and local model evaluation. We illustrated how EPC-based diagnostics evolve as model specification changes and how conclusions depend on the chosen SESOI.
+
+We also demonstrated the role of `epcEquivCheck()`, which assesses whether compensatory effects may inflate EPCs such that trivial misspecifications produce apparently substantial EPCs. When this occurs, trivial equivalence becomes difficult to achieve, and substantial EPCs must be interpreted with caution. Analysts should evaluate whether theoretically justified model adjustments address the underlying misspecification rather than merely compensatory distortions.
+
+Finally, we emphasize that EPC-based equivalence testing is **not** intended to legitimize post-hoc model modification. Rather, it provides a principled framework for evaluating whether a model can be treated as approximately correct relative to substantively meaningful effect sizes. Substantive theory and cross-validation remain essential.
+

@@ -1,6 +1,6 @@
 # EPC Equivalence Testing in SEM
 
-🌐 **Project website (HTML materials):**  
+🌐 **Example Codes:**  
 https://psunthud.github.io/epc-equivalence-sem/
 
 Simulation studies, an empirical illustrative example, and presentation materials for EPC-based equivalence testing in confirmatory factor analysis (CFA) and structural equation modeling (SEM).
